@@ -1,0 +1,123 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ユーザーが認証済みかチェック
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // メールドメインチェック
+    function hasManaableDomain() {
+      return request.auth.token.email.matches('.*@manaable.com$');
+    }
+
+    // リクエストユーザーが管理者かチェック
+    function isAdmin() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN';
+    }
+
+    // リクエストユーザーがHR管理者かチェック
+    function isHRManager() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'HR_MANAGER';
+    }
+
+    // リクエストユーザーが対象ドキュメントの所有者かチェック
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // HR管理権限チェック
+    function canManageHR() {
+      return isAuthenticated() && hasManaableDomain() && (isAdmin() || isHRManager());
+    }
+
+    // Hackathon投票システムのルール
+    match /hackathonTeamMembers/{userId} {
+      allow read: if isAuthenticated() && hasManaableDomain();
+      allow write: if isAdmin();
+    }
+
+    match /hackathonVotes/{voteId} {
+      allow read: if isAuthenticated() && hasManaableDomain();
+      allow create: if isAuthenticated() && hasManaableDomain() && 
+        // 自分のチームには投票できない
+        !exists(/databases/$(database)/documents/hackathonTeamMembers/$(request.auth.uid)) ||
+        get(/databases/$(database)/documents/hackathonTeamMembers/$(request.auth.uid)).data.team != request.resource.data.teamId;
+    }
+
+    match /hackathonSettings/{settingId} {
+      allow read: if isAuthenticated() && hasManaableDomain();
+      allow create, update: if isAdmin();
+    }
+
+    // ユーザードキュメントのルール
+    match /users/{userId} {
+      allow read: if isAuthenticated() && hasManaableDomain();
+      allow create: if isAuthenticated() && 
+        isOwner(userId) && 
+        hasManaableDomain() &&
+        request.resource.data.email == request.auth.token.email;
+      allow update: if isAuthenticated() && 
+        hasManaableDomain() && 
+        (isOwner(userId) || isAdmin() || isHRManager());
+      allow delete: if isAdmin();
+    }
+
+    // 契約ドキュメントのルール
+    match /contracts/{contractId} {
+      allow read: if isAuthenticated() && hasManaableDomain();
+      allow write: if isAuthenticated() && hasManaableDomain() && (isAdmin() || isHRManager());
+    }
+
+    // ARRターゲットのルール
+    match /targets/{targetId} {
+      allow read: if isAuthenticated() && hasManaableDomain();
+      allow write: if isAuthenticated() && hasManaableDomain() && (isAdmin() || isHRManager());
+    }
+
+    // オフィスのルール
+    match /offices/{officeId} {
+      allow read: if isAuthenticated() && hasManaableDomain();
+      allow create, update: if canManageHR();
+      allow delete: if isAdmin();
+    }
+
+    // 部署のルール
+    match /departments/{departmentId} {
+      allow read: if isAuthenticated() && hasManaableDomain();
+      allow create, update: if canManageHR();
+      allow delete: if isAdmin();
+    }
+
+    // 役職のルール
+    match /positions/{positionId} {
+      allow read: if isAuthenticated() && hasManaableDomain();
+      allow create, update: if canManageHR();
+      allow delete: if isAdmin();
+    }
+
+    // 従業員プロファイルのルール
+    match /employees/{employeeId} {
+      allow read: if isAuthenticated() && hasManaableDomain();
+      allow create, update: if canManageHR();
+      allow delete: if isAdmin();
+    }
+
+    // スキルのルール
+    match /skills/{skillId} {
+      allow read: if isAuthenticated() && hasManaableDomain();
+      allow create, update: if canManageHR();
+      allow delete: if isAdmin();
+    }
+
+    // アクセス制御のルール
+    match /accessControls/{controlId} {
+      allow read: if isAuthenticated() && hasManaableDomain();
+      allow write: if isAdmin();
+    }
+  }
+}
